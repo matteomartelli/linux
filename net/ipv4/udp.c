@@ -132,6 +132,8 @@ EXPORT_SYMBOL(udp_memory_allocated);
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
 
+#define ABPS_DEBUG 1
+
 static int udp_lib_lport_inuse(struct net *net, __u16 num,
 			       const struct udp_hslot *hslot,
 			       unsigned long *bitmap,
@@ -849,6 +851,7 @@ send:
 	return err;
 }
 
+
 /*
  * Push out all pending data as one UDP datagram. Socket is locked.
  */
@@ -873,10 +876,12 @@ out:
 }
 EXPORT_SYMBOL(udp_push_pending_frames);
 
+
 int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		size_t len)
 {
-	struct inet_sock *inet = inet_sk(sk);
+    
+    struct inet_sock *inet = inet_sk(sk);
 	struct udp_sock *up = udp_sk(sk);
 	struct flowi4 fl4_stack;
 	struct flowi4 *fl4;
@@ -889,11 +894,19 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	__be16 dport;
 	u8  tos;
 	int err, is_udplite = IS_UDPLITE(sk);
+
 	int corkreq = up->corkflag || msg->msg_flags&MSG_MORE;
 	int (*getfrag)(void *, char *, int, int, int, struct sk_buff *);
 	struct sk_buff *skb;
 	struct ip_options_data opt_copy;
 
+    /* ABPS Gab */
+    USER_P_UINT32 pointer_to_identifier = NULL;
+    
+    int skb_is_null = 0;
+    
+    uint32_t is_identifier_required = 0;
+    
 	if (len > 0xFFFF)
 		return -EMSGSIZE;
 
@@ -960,6 +973,19 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	ipc.oif = sk->sk_bound_dev_if;
 
 	sock_tx_timestamp(sk, &ipc.tx_flags);
+    
+    /* ABPS Gab */
+    if (msg->msg_controllen)
+    {
+        err = udp_cmsg_send(msg, &is_identifier_required, &pointer_to_identifier);
+        if (err)
+        {
+            printk(KERN_NOTICE "Transmission Error Detector: udp_cmsg_send failed with error in udp_sendmsg.\n");
+            return err;
+        }
+    }
+    /* end ABPS Gab*/
+    
 
 	if (msg->msg_controllen) {
 		err = ip_cmsg_send(sock_net(sk), msg, &ipc,
@@ -1049,12 +1075,18 @@ back_from_confirm:
 
 	/* Lockless fast path for the non-corking case. */
 	if (!corkreq) {
-		skb = ip_make_skb(sk, fl4, getfrag, msg, ulen,
+      	skb = ip_make_skb(sk, fl4, getfrag, msg, ulen,
 				  sizeof(struct udphdr), &ipc, &rt,
 				  msg->msg_flags);
 		err = PTR_ERR(skb);
 		if (!IS_ERR_OR_NULL(skb))
-			err = udp_send_skb(skb, fl4);
+            err = udp_send_skb(skb, fl4);
+        else
+        {
+            /* ABPS Gab */
+            skb_is_null = 1;
+        }
+        
 		goto out;
 	}
 
@@ -1080,18 +1112,30 @@ back_from_confirm:
 
 do_append_data:
 	up->len += ulen;
-	err = ip_append_data(sk, fl4, getfrag, msg, ulen,
+  	err = ip_append_data(sk, fl4, getfrag, msg, ulen,
 			     sizeof(struct udphdr), &ipc, &rt,
 			     corkreq ? msg->msg_flags|MSG_MORE : msg->msg_flags);
 	if (err)
 		udp_flush_pending_frames(sk);
 	else if (!corkreq)
-		err = udp_push_pending_frames(sk);
+    {
+       err = udp_push_pending_frames(sk);
+    }
 	else if (unlikely(skb_queue_empty(&sk->sk_write_queue)))
 		up->pending = 0;
 	release_sock(sk);
 
 out:
+    /* ABPS Gab */
+    if(is_identifier_required)
+    {
+        if(!skb_is_null)
+        {
+            // Datagram identifier setted in user space
+            put_user(skb->sk_buff_identifier, pointer_to_identifier);
+        }
+    }
+    
 	ip_rt_put(rt);
 	if (free)
 		kfree(ipc.opt);

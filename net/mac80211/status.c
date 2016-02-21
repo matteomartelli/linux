@@ -15,11 +15,35 @@
 #include <linux/time.h>
 #include <net/mac80211.h>
 #include <asm/unaligned.h>
+/* ABPS Gab */
+#include <net/ip.h>
+
 #include "ieee80211_i.h"
 #include "rate.h"
 #include "mesh.h"
 #include "led.h"
 #include "wme.h"
+
+/* ABPS Gab */
+#include "ABPS_mac80211.h"
+
+
+/*Developed by Lorenzo Sorace and VIC, may 2009 */
+static void (*ABPSmonitor_statistic_handler)(
+                                             struct ieee80211_hw *hw,
+                                             struct sta_info *sta,
+                                             struct ieee80211_hdr *hdr,
+                                             struct ieee80211_tx_info *info,
+                                             struct ieee80211_local *local) = NULL;
+
+void ABPSmonitor_set_handler(void * ptr)
+{
+    ABPSmonitor_statistic_handler = ptr;
+}
+
+EXPORT_SYMBOL(ABPSmonitor_set_handler);
+
+
 
 
 void ieee80211_tx_status_irqsafe(struct ieee80211_hw *hw,
@@ -894,6 +918,42 @@ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 			local->dot11FailedCount++;
 	}
 
+    /* ABPS Gab */
+    
+    if (skb)
+    {
+        struct sock *sk = skb->sk;
+ 
+        if (required_ip_local_error_notify(sk))
+        {
+            struct ieee80211_hdr *hdr = NULL;
+            int ret;
+            struct net_device *dev = skb->dev;
+            if(dev)
+            {
+                sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+                if(sdata)
+                {
+                    hdr = (struct ieee80211_hdr *) skb->data;
+                    ret = ABPS_info_response(sk, hw, hdr, info, sdata);
+                    printk(KERN_DEBUG "*** ABPS *** ieee80211_tx_status:"
+                           " ABPS_info_response value %d \n", ret);
+                }
+                else
+                {
+                    printk(KERN_NOTICE "Transmission Error Detector: sdata is null in ieee80211_tx_status \n");
+                }
+                sdata = NULL;
+            }
+            else
+            {
+                printk(KERN_NOTICE "Transmission Error Detector: skb dev field is null in skb in ieee80211_tx_status \n");
+            }
+        }
+    }
+
+    /* end ABPS Gab */
+    
 	if (ieee80211_is_nullfunc(fc) && ieee80211_has_pm(fc) &&
 	    (local->hw.flags & IEEE80211_HW_REPORTS_TX_ACK_STATUS) &&
 	    !(info->flags & IEEE80211_TX_CTL_INJECTED) &&
@@ -907,7 +967,7 @@ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 	}
 
 	ieee80211_report_used_skb(local, skb, false);
-
+    
 	/* this was a transmitted frame, but now we want to reuse it */
 	skb_orphan(skb);
 

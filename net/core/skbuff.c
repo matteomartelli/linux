@@ -251,8 +251,9 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 	skb->end = skb->tail + size;
 	skb->mac_header = (typeof(skb->mac_header))~0U;
 	skb->transport_header = (typeof(skb->transport_header))~0U;
-
-	/* make sure we initialize shinfo sequentially */
+    
+    
+  	/* make sure we initialize shinfo sequentially */
 	shinfo = skb_shinfo(skb);
 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
 	atomic_set(&shinfo->dataref, 1);
@@ -4169,21 +4170,19 @@ EXPORT_SYMBOL(skb_try_coalesce);
  */
 void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 {
+	if (xnet)
+		skb_orphan(skb);
 	skb->tstamp.tv64 = 0;
 	skb->pkt_type = PACKET_HOST;
 	skb->skb_iif = 0;
 	skb->ignore_df = 0;
 	skb_dst_drop(skb);
+	skb->mark = 0;
 	skb_sender_cpu_clear(skb);
+	skb_init_secmark(skb);
 	secpath_reset(skb);
 	nf_reset(skb);
 	nf_reset_trace(skb);
-
-	if (!xnet)
-		return;
-
-	skb_orphan(skb);
-	skb->mark = 0;
 }
 EXPORT_SYMBOL_GPL(skb_scrub_packet);
 
@@ -4455,3 +4454,37 @@ failure:
 	return NULL;
 }
 EXPORT_SYMBOL(alloc_skb_with_frags);
+
+
+/* ABPS Gab */
+
+static uint32_t global_identifier = 0;
+
+uint32_t get_global_identifier(void)
+{
+    static DEFINE_SPINLOCK(lock);
+    
+    uint32_t identifier;
+    
+    unsigned long flags;
+    
+    spin_lock_irqsave(&lock, flags);
+    identifier = global_identifier++;
+    spin_unlock_irqrestore(&lock, flags);
+    
+    return identifier;
+}
+
+int set_identifier_with_sk_buff(struct sk_buff *skb)
+{
+    if(skb)
+    {
+        skb->sk_buff_identifier = get_global_identifier();
+        return 0;
+    }
+    printk(KERN_NOTICE "Transmission Error Detector: invalid skb in set_identifier_with_sk_buff()\n");
+    return 1;
+}
+
+
+EXPORT_SYMBOL(set_identifier_with_sk_buff);

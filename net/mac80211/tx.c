@@ -27,7 +27,10 @@
 #include <net/mac80211.h>
 #include <asm/unaligned.h>
 
-#include "ieee80211_i.h"
+/* ABPS Gab */
+#include <net/ip.h>
+#include "ABPS_mac80211.h"
+
 #include "driver-ops.h"
 #include "led.h"
 #include "mesh.h"
@@ -846,6 +849,26 @@ ieee80211_tx_h_sequence(struct ieee80211_tx_data *tx)
 
 	/* Increase the sequence number. */
 	*seq = (*seq + 0x10) & IEEE80211_SCTL_SEQ;
+    
+    /* ABPS Gab */
+    
+    if(tx->skb)
+    {
+        if(required_ip_local_error_notify(tx->skb->sk))
+        {
+            int return_value = ABPS_extract_pkt_info_with_skb(hdr, tx->skb);
+            if(return_value)
+            {
+                printk(KERN_NOTICE "Transmission Error Detector: added new datagram with identifier %d in TED packets list. \n", tx->skb->sk_buff_identifier);
+            }
+            else
+            {
+                printk(KERN_NOTICE "Transmission Error Detector: something went wrong adding new element in TED packet list. %d \n", tx->skb->sk_buff_identifier);
+            }
+        }
+    }
+    
+    /* end ABPS Gab */
 
 	return TX_CONTINUE;
 }
@@ -1537,7 +1560,7 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb)
 	headroom = max_t(int, 0, headroom);
 
 	if (ieee80211_skb_resize(sdata, skb, headroom, may_encrypt)) {
-		ieee80211_free_txskb(&local->hw, skb);
+        ieee80211_free_txskb(&local->hw, skb);
 		return;
 	}
 

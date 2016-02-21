@@ -132,6 +132,9 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 				struct pipe_inode_info *pipe, size_t len,
 				unsigned int flags);
 
+/* ABPS Gab */
+#define ABPS_DEBUG
+
 /*
  *	Socket files have a set of 'special' operations as well as the generic file ones. These don't appear
  *	in the operation structures but are done directly via the socketcall() multiplexor.
@@ -3380,3 +3383,41 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 	return sock->ops->shutdown(sock, how);
 }
 EXPORT_SYMBOL(kernel_sock_shutdown);
+
+
+/* ABPS Gab */
+int udp_cmsg_send(struct msghdr *msg, uint32_t *is_identifier_required, USER_P_UINT32 *pointer_to_identifier)
+{
+    struct cmsghdr *cmsg;
+    *is_identifier_required = 0;
+    
+    if(pointer_to_identifier == NULL)
+    {
+        printk(KERN_NOTICE "Transmission Error Detector udp_cmsg_send returned: -EFAULT\n");
+        return -EFAULT;
+    }
+    
+    for (cmsg=CMSG_FIRSTHDR(msg); cmsg; cmsg=CMSG_NXTHDR(msg,cmsg))
+    {
+        if (!CMSG_OK(msg, cmsg))
+        {
+            printk(KERN_NOTICE "Transmission Error Detector udp_cmsg_send returned: -EINVAL\n");
+            return -EINVAL;
+        }
+        
+        if (cmsg->cmsg_level!=SOL_UDP)
+            continue;
+        
+        if(cmsg->cmsg_type == ABPS_CMSG_TYPE)
+        {
+            memcpy(pointer_to_identifier, (USER_P_UINT32)CMSG_DATA(cmsg), sizeof(USER_P_UINT32));
+
+            printk(KERN_NOTICE "udp_cmsg_send: pointer_to_identier just setted to %p\n", *pointer_to_identifier);
+            *is_identifier_required=1;
+            return 0;
+        }
+    }
+    return 0;
+}
+
+EXPORT_SYMBOL(udp_cmsg_send);

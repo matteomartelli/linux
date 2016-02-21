@@ -1124,6 +1124,16 @@ int udpv6_sendmsg(struct kiocb *iocb, struct sock *sk,
 	int connected = 0;
 	int is_udplite = IS_UDPLITE(sk);
 	int (*getfrag)(void *, char *, int, int, int, struct sk_buff *);
+    
+    /* ABPS Gab */
+    
+    struct sk_buff *skb;
+    
+    USER_P_UINT32 pointer_to_identifier = NULL;
+    
+    uint32_t is_identifier_required = 0;
+    
+    /* end ABPS Gab */
 
 	/* destination address check */
 	if (sin6) {
@@ -1243,6 +1253,20 @@ do_udp_sendmsg:
 		fl6.flowi6_oif = np->sticky_pktinfo.ipi6_ifindex;
 
 	fl6.flowi6_mark = sk->sk_mark;
+    
+    /* ABPS Gab */
+    
+    if (msg->msg_controllen)
+    {
+        err = udp_cmsg_send(msg, &is_identifier_required, &pointer_to_identifier);
+        if (err)
+        {
+            printk(KERN_NOTICE "udp_cmsg_send return err \n");
+            return err;
+        }
+        printk(KERN_NOTICE "is_identifier_required %d \n", is_identifier_required);
+    }
+    /* end ABPS Gab*/
 
 	if (msg->msg_controllen) {
 		opt = &opt_space;
@@ -1310,8 +1334,6 @@ back_from_confirm:
 
 	/* Lockless fast path for the non-corking case */
 	if (!corkreq) {
-		struct sk_buff *skb;
-
 		skb = ip6_make_skb(sk, getfrag, msg, ulen,
 				   sizeof(struct udphdr), hlimit, tclass, opt,
 				   &fl6, (struct rt6_info *)dst,
@@ -1372,6 +1394,19 @@ release_dst:
 	}
 
 out:
+    /* ABPS Gab */
+    
+    if(is_identifier_required)
+    {
+        if(skb)
+        {
+            // need to set identifier in user space
+            put_user(skb->sk_buff_identifier, pointer_to_identifier);
+        }
+    }
+
+    /* end ABPS Gab */
+    
 	dst_release(dst);
 	fl6_sock_release(flowlabel);
 	if (!err)
